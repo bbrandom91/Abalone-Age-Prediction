@@ -787,7 +787,7 @@ sns.heatmap(corr, xticklabels=corr.columns.values,yticklabels=corr.columns.value
 
 
 
-    <matplotlib.axes._subplots.AxesSubplot at 0x1a1e278780>
+    <matplotlib.axes._subplots.AxesSubplot at 0x1a1581bc88>
 
 
 
@@ -799,7 +799,7 @@ Almost everything is strongly correlated with everything else, except ring count
 
 All of the features features associated with weight are pretty much perfectly correlated with each other, with pearson coefficients > 0.95 for whole weight. This isn't surprising since they're just the weights of different parts of the same abalone. I think we can safely drop the shucked weight, viscera weight, and shell weight and just keep whole weight (PCA is probably overkill).
 
-Length and diameter are just about perfectly correlated. The circumfrence of an ellipse is proportional to its length with the constant of proportionality determined by its eccentricity, so no surprise there. Height is strongly correlated with the remaining features, but not as strongly as, say, length with diameter. We'll replace these three features with their geometric mean.
+Length and diameter are just about perfectly correlated. The circumfrence of an ellipse is proportional to its length with the constant of proportionality determined by its eccentricity, so no surprise there. Height is strongly correlated with the remaining features, but not as strongly as, say, length with diameter. We'll replace these three features with their geometric mean. While keeping length, diameter, and height can only help with prediction, I think the benefits gained of an easier to interpret model outweight the marginal gain of predictability from keeping them.
 
 
 ```python
@@ -878,7 +878,7 @@ plt.scatter(data_trunc["Whole_Weight"], data_trunc["Char_Len"])
 
 
 
-    <matplotlib.collections.PathCollection at 0x1a1e2787f0>
+    <matplotlib.collections.PathCollection at 0x1a18d82dd8>
 
 
 
@@ -897,7 +897,7 @@ plt.scatter(np.cbrt(data_trunc["Whole_Weight"]), data_trunc["Char_Len"])
 
 
 
-    <matplotlib.collections.PathCollection at 0x1a218bea90>
+    <matplotlib.collections.PathCollection at 0x1a18e61630>
 
 
 
@@ -927,7 +927,7 @@ sns.distplot(di["x"])
 
 
 
-    <matplotlib.axes._subplots.AxesSubplot at 0x1a21801400>
+    <matplotlib.axes._subplots.AxesSubplot at 0x1a18d8de10>
 
 
 
@@ -1031,16 +1031,16 @@ data_trunc.head()
 
 ```python
 plt.scatter(data_trunc.loc[data_trunc["Is_Infant"] == 0 ]["x"],
-            data_trunc.loc[data_trunc["Is_Infant"] == 0 ]["Rings"], color="green", alpha=0.3)
+            data_trunc.loc[data_trunc["Is_Infant"] == 0 ]["Rings"], color="green")
 plt.scatter(data_trunc.loc[data_trunc["Is_Infant"] == 1 ]["x"],
-            data_trunc.loc[data_trunc["Is_Infant"] == 1 ]["Rings"], color="blue", alpha=0.3)
+            data_trunc.loc[data_trunc["Is_Infant"] == 1 ]["Rings"], color="blue")
 plt.ylabel("Ring Count")
 ```
 
 
 
 
-    <matplotlib.text.Text at 0x1a21bbfda0>
+    <matplotlib.text.Text at 0x1a19132b70>
 
 
 
@@ -1064,7 +1064,7 @@ plt.ylabel("Log of Ring Count")
 
 
 
-    <matplotlib.text.Text at 0x1a21c1fd30>
+    <matplotlib.text.Text at 0x1a191bca90>
 
 
 
@@ -1076,7 +1076,9 @@ Alright, let's get to modelling the data.
 
 ## 4) Model The Data
 
-Let's try fitting the data with a curve. SKlearn doesn't have a method for fitting splines, but SciPy does. The UnivariateSpline function will fit a curve to an input of (x,y) pairs. We can specify the degree of the fitting polynomial, how the knots are chosen, and the smoothing parameter. Let's construct separate splines for the infant and non-infant values.
+As a first pass we will model log of ring count with a spline fit by minizing the RSS.
+
+SKlearn doesn't have a method for fitting splines, but SciPy does. The UnivariateSpline function will fit a curve to an input of (x,y) pairs. We can specify the degree of the fitting polynomial, how the knots are chosen, and the smoothing parameter. Let's construct separate splines for the infant and non-infant values.
 
 
 ```python
@@ -1131,7 +1133,7 @@ ax.legend(loc="best")
 
 
 
-    <matplotlib.legend.Legend at 0x1a2205af28>
+    <matplotlib.legend.Legend at 0x1a19600a90>
 
 
 
@@ -1155,7 +1157,7 @@ ax.legend(loc="best")
 
 
 
-    <matplotlib.legend.Legend at 0x1a222275f8>
+    <matplotlib.legend.Legend at 0x1a19891198>
 
 
 
@@ -1186,7 +1188,7 @@ ax.legend(loc="best")
 
 
 
-    <matplotlib.legend.Legend at 0x1a2230a1d0>
+    <matplotlib.legend.Legend at 0x1a199f7d68>
 
 
 
@@ -1213,7 +1215,7 @@ ax.legend(loc="best")
 
 
 
-    <matplotlib.legend.Legend at 0x1a225d5160>
+    <matplotlib.legend.Legend at 0x1a19b71cf8>
 
 
 
@@ -1221,9 +1223,94 @@ ax.legend(loc="best")
 ![png](output_43_1.png)
 
 
-Instead of doing regression, we can also try classification. There are 29 labels and they aren't uniformly distributed across the data. Some things we can try: 1) Try to classify all 29 classes; 2) Bin the classes into, say, three categories and predict the classification for these new categories; or 3) Pick, say, the three most populated ring groups and just try to model them.
+Let's try using a GLM for this problem. Rather than treating ring count (or log of ring count) as a continuous variable, let's actually take the fact that they are discrete in account in the model. Denote $\lambda = E(Y|X=x)$ for the conditional expectation value of $Y$, where $Y$ is the ring count. Let's assume that the conditional distribution is Poisson, and we'll use a log link. Then, writing $\lambda = e^{f(x)}$, where $f$ is our model, we have
 
-Maybe I'll do this later. 
+\begin{equation}
+p(y|x) = \frac{\lambda^{y}e^{-\lambda}}{y !}
+\end{equation}
+
+It's easy to check that the log-likelihood $\ell$ is given by
+
+\begin{equation}
+\ell = \sum_{i} y^{(i)}f(x^{(i)}) - e^{f(x^{(i)})} - \log (y^{(i)}!)
+\end{equation}
+
+Taking a derivative with respect to the parameter $\theta$ gives
+
+\begin{equation}
+\partial_{\theta}\ell = \sum_{i} \left[ y^{(i)} - e^{f(x^{(i)})} \right] \frac{\partial f}{\partial \theta}(x^{(i)})
+\end{equation}
+
+For simplicty, let's take $f(x) = \theta_0 + \theta_1 x$. We could use a spline again, but looking at the plots above I think a linear model should be fine. If we solve the problem with gradient descent, the update procedure is
+\begin{gather}
+\theta_0 \leftarrow \theta_0 + \frac{\alpha}{m}\sum_{i} \left[ y^{(i)} - e^{f(x^{(i)})} \right] \\
+\theta_1 \leftarrow \theta_1 + \frac{\alpha}{m}\sum_{i} \left[ y^{(i)} - e^{f(x^{(i)})} \right]x^{(i)}
+\end{gather}
+
+Just for fun, let's see how it does on the infant case (which looks the most linear).
+
+
+
+
+```python
+theta0 = 1.0
+theta1 = 2.5
+#theta2 = 0.5
+#theta3 = 0.7
+
+X = inf_data["x"].as_matrix()
+Y = inf_data["Rings"].as_matrix()
+
+m = len(X)
+alpha = 0.0001
+
+def f(x):
+    return theta0 + theta1 * x 
+
+for j in range(10000):
+    delta0 = (alpha/m)*np.sum(Y - np.exp(f(X)))
+    delta1 =(alpha/m)*np.dot(Y - np.exp(f(X)), X)
+    theta0 += delta0
+    theta1 += delta1
+
+
+```
+
+
+```python
+plt.plot(X, np.exp(f(X)) , alpha=0.5, color='red')
+plt.scatter(X, Y, alpha = 0.2, color='purple')
+```
+
+
+
+
+    <matplotlib.collections.PathCollection at 0x1a1b78fe48>
+
+
+
+
+![png](output_46_1.png)
+
+
+
+```python
+plt.plot(X, f(X), alpha=0.5, color='red')
+plt.scatter(X, np.log(Y), alpha = 0.2, color='purple')
+```
+
+
+
+
+    <matplotlib.collections.PathCollection at 0x1a1b97d630>
+
+
+
+
+![png](output_47_1.png)
+
+
+It seems to be doing okay, but I think the extra flexibility and local optimization used in the spline is why it worked well, as opposed to finding the most appropriate cost function.
 
 ## 5) Interpret the Data
 Let's summarize what I did first.
